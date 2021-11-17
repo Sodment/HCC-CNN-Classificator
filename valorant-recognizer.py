@@ -1,6 +1,5 @@
 import cv2
 import glob
-import numpy
 import random
 import numpy as np # for transformation
 import albumentations as A
@@ -48,8 +47,8 @@ test_transforms = A.Compose(
 ####################################################
 #       Create Train, Valid and Test sets
 ####################################################
-train_data_path = 'images/Train' 
-test_data_path = 'images/Test'
+train_data_path = 'images/train' 
+test_data_path = 'images/test'
 
 train_image_paths = [] #to store image paths in list
 classes = [] #to store class values
