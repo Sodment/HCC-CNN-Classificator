@@ -9,12 +9,14 @@ import matplotlib.pyplot as plt
 #ez
 
 
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, dataloader
 import torch
 import torchvision
 import torchvision.transforms as transforms
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.optim as optim
+
 
 def flatten(t):
     return [item for sublist in t for item in sublist]
@@ -23,7 +25,7 @@ def flatten(t):
   #               Define Dataset Class
   #######################################################
 
-class AgentDataset(Dataset):
+class CustomDataset(Dataset):
     def __init__(self, image_paths, transform=False, class_to_idx=None):
         self.image_paths = image_paths
         self.transform = transform
@@ -92,12 +94,26 @@ class Net(nn.Module):
         x = self.linear_layers(x)
         return x
 
-def main():
+def load_datasets(datasets, batch_size=64, num_workers=2):
+    train_dataset = datasets[0]
+    valid_dataset = datasets[1]
+    test_dataset = datasets[2]
+    train_loader = DataLoader(
+        train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers
+    )
 
-    minutes_for_traing = 30
-    batch_size = 64
-    num_workers = 2
+    valid_loader = DataLoader(
+        valid_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers
+    )
 
+    test_loader = DataLoader(
+        test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers
+    )
+    return (train_loader, valid_loader, test_loader)
+
+
+
+def create_datasets(train_data_path = 'images\\train', test_data_path = 'images\\test'):
     #######################################################
     #               Define Transforms
     #######################################################
@@ -133,8 +149,6 @@ def main():
     ####################################################
     #       Create Train, Valid and Test sets
     ####################################################
-    train_data_path = 'images\\train'
-    test_data_path = 'images\\test'
 
     train_image_paths = []  # to store image paths in list
     classes = []  # to store class values
@@ -142,16 +156,14 @@ def main():
 
     # 1.
     # get all the paths from train_data_path and append image paths and class to to respective lists
-    # eg. train path-> 'images/train/26.Pont_du_Gard/4321ee6695c23c7b.jpg'
-    # eg. class -> 26.Pont_du_Gard
     for data_path in glob.glob(train_data_path + '/*'):
         classes.append(data_path.split('\\')[-1])
         train_image_paths.append(glob.glob(data_path + '/*'))
     train_image_paths = list(flatten(train_image_paths))
     random.shuffle(train_image_paths)
 
-    print('train_image_path example: ', train_image_paths[0])
-    print('class example: ', classes[0])
+    print('Train_image_path example: ', train_image_paths[0])
+    print('Class example: ', classes[0])
 
     train_image_paths, valid_image_paths = train_image_paths[:int(
         0.8*len(train_image_paths))], train_image_paths[int(0.8*len(train_image_paths)):]
@@ -178,20 +190,22 @@ def main():
     #                  Create Dataset
     #######################################################
 
-    train_dataset = AgentDataset(train_image_paths, train_transforms, class_to_idx=class_to_idx)
-    valid_dataset = AgentDataset(valid_image_paths, test_transforms, class_to_idx=class_to_idx)  # test transforms are applied
-    test_dataset = AgentDataset(test_image_paths, test_transforms, class_to_idx=class_to_idx)
+    train_dataset = CustomDataset(train_image_paths, train_transforms, class_to_idx=class_to_idx)
+    valid_dataset = CustomDataset(valid_image_paths, test_transforms, class_to_idx=class_to_idx)  # test transforms are applied
+    test_dataset = CustomDataset(test_image_paths, test_transforms, class_to_idx=class_to_idx)
 
     #print('The shape of tensor for 50th image in train dataset: ',
           #train_dataset[0][0].shape)
     #print('The label for 50th image in train dataset: ', train_dataset[0][0])
+    return (classes, train_dataset, valid_dataset, test_dataset)
 
-    #######################################################
-    #                  Visualize Dataset
-    #         Images are plotted after augmentation
-    #######################################################
+def imshow(img):
+        img = img / 2 + 0.5     # unnormalize
+        npimg = img.numpy()
+        plt.imshow(np.transpose(npimg, (1, 2, 0)))
+        plt.show()
 
-    def visualize_augmentations(dataset, idx=0, samples=10, cols=5, random_img=False):
+def visualize_augmentations(dataset, idx=0, samples=10, cols=5, random_img=False):
 
         dataset = copy.deepcopy(dataset)
         # we remove the normalize and tensor conversion from our augmentation pipeline
@@ -212,51 +226,25 @@ def main():
 
     #visualize_augmentations(train_dataset,np.random.randint(1,len(train_image_paths)), random_img = True)
 
-    #######################################################
-    #                  Define Dataloaders
-    #######################################################
 
-    train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers
-    )
-
-    valid_loader = DataLoader(
-        valid_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers
-    )
-
-    test_loader = DataLoader(
-        test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers
-    )
-
-    def imshow(img):
-        img = img / 2 + 0.5     # unnormalize
-        npimg = img.numpy()
-        plt.imshow(np.transpose(npimg, (1, 2, 0)))
-        plt.show()
+def train_new_model(classes, dataset, num_epochs, name='saved_model.pth'):
+    train_loader = dataset[0]
+    valid_loader = dataset[1]
+    test_loader = dataset[2]
 
     # get some random training images
-    #dataiter = iter(train_loader)
-    #images, labels = dataiter.next()
-
-    #imshow(torchvision.utils.make_grid(images))
-    #print(' '.join('%5s' % classes[labels[j]] for j in range(batch_size)))
+    dataiter = iter(train_loader)
+    images, labels = dataiter.next()
+    imshow(torchvision.utils.make_grid(images))
 
     net = Net()
-
-    import torch.optim as optim
-    import datetime
+    min_valid_loss = np.inf
 
     criterion = nn.CrossEntropyLoss()
-    
     optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
     #optimizer = optim.Adam(net.parameters(), lr=0.1)
     #optimizer = optim.Adadelta(net.parameters(), lr=0.1)
-
-    endTime = datetime.datetime.now() + datetime.timedelta(minutes=minutes_for_traing)
-    min_valid_loss = np.inf
-    for epoch in range(26):  # loop over the dataset multiple times
-        if datetime.datetime.now() >= endTime:
-            break
+    for epoch in range(num_epochs):  # loop over the dataset multiple times
         running_loss = 0.0
         net.train(True)
         for i, data in enumerate(train_loader, 0):
@@ -348,6 +336,67 @@ def main():
         print("Accuracy for class {:5s} is: {:.1f} %".format(classname,
                                                              accuracy))
 
+def load_run(test_dataset, classes, path):
+    net = Net()
+    net.load_state_dict(torch.load(path))
+    net.eval()
+
+    dataiter = iter(test_dataset)
+    images,labels = dataiter.next()
+
+    # print images
+    #imshow(torchvision.utils.make_grid(images))
+    print('GroundTruth: ', ' '.join('%5s' %
+                                    classes[labels[j]] for j in range(4)))
+
+    outputs = net(images)
+
+    _, predicted = torch.max(outputs, 1)
+
+    print('Predicted: ', ' '.join('%5s' % classes[predicted[j]]
+                              for j in range(4)))
+
+    correct = 0
+    total = 0
+    # since we're not training, we don't need to calculate the gradients for our outputs
+    with torch.no_grad():
+        for data in test_dataset:
+            images, labels = data
+            # calculate outputs by running images through the network
+            outputs = net(images)
+            # the class with the highest energy is what we choose as prediction
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+
+    print('Accuracy of the network on the 1250 test images: %d %%' % (
+        100 * correct / total))
+
+    correct_pred = {classname: 0 for classname in classes}
+    total_pred = {classname: 0 for classname in classes}
+
+    # again no gradients needed
+    with torch.no_grad():
+        for data in test_dataset:
+            images, labels = data
+            outputs = net(images)
+            _, predictions = torch.max(outputs, 1)
+            # collect the correct predictions for each class
+            for label, prediction in zip(labels, predictions):
+                if label == prediction:
+                    correct_pred[classes[label]] += 1
+                total_pred[classes[label]] += 1
+
+    # print accuracy for each class
+    for classname, correct_count in correct_pred.items():
+        accuracy = 100 * float(correct_count) / total_pred[classname]
+        print("Accuracy for class {:5s} is: {:.1f} %".format(classname,
+                                                             accuracy))
+
+
 
 if __name__ == '__main__':
-    main()
+    classes, *dataset_raw = create_datasets()
+    dataloaders = load_datasets(dataset_raw)
+    train_new_model(classes, dataloaders, 26, name='saved_model4.pth')
+    #load_run(dataloaders[2], classes,'saved_model3.pth')
