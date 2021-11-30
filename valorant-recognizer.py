@@ -49,22 +49,9 @@ class CustomDataset(Dataset):
 class Net(nn.Module):
     def __init__(self):
         super().__init__()
-        self.conv1 = nn.Conv2d(3, 6, 5)
-        self.pool = nn.MaxPool2d(2, 2)
-        self.conv2 = nn.Conv2d(6, 16, 5)
-        self.fc1 = nn.Linear(13456, 1024)
-        self.fc2 = nn.Linear(1024, 512)
-        self.fc3 = nn.Linear(512, 50)
-        self.dropout1 = nn.Dropout(0.1)
-        self.dropout2 = nn.Dropout(0.2)
         self.cnn_layers = nn.Sequential(
             # Defining a 2D convolution layer
-            nn.Conv2d(3, 6, 5),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-            nn.Dropout(0.2),
-            # Defining another 2D convolution layer
-            nn.Conv2d(6, 16, 5),
+            nn.Conv2d(3, 16, 5), #default (3,6,5)
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
             nn.Dropout(0.2),
@@ -72,23 +59,21 @@ class Net(nn.Module):
             nn.Conv2d(16, 32, 5),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Dropout(0.2),
+            # Defining another 2D convolution layer
+            nn.Conv2d(32, 64, 5),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2, stride=2),
             nn.Dropout(0.1)
         )
         self.linear_layers = nn.Sequential(
-            nn.Linear(4608, 400),
-            nn.Linear(400, 84),
-            nn.Linear(84, 6)
+            nn.Linear(14400, 440), #400
+            nn.Linear(440,120), #84
+            nn.Linear(120, 6)
         )
 
 
     def forward(self, x):
-        #x = self.pool(F.relu(self.conv1(x)))
-        #x = self.dropout1(x)
-        #x = self.pool(F.relu(self.conv2(x)))
-        #x = x.view(x.size(0), -1)
-        #x = F.relu(self.fc1(x))
-        #x = F.relu(self.fc2(x))
-        #x = self.fc3(x)
         x = self.cnn_layers(x)
         x = x.view(x.size(0), -1)
         x = self.linear_layers(x)
@@ -111,8 +96,6 @@ def load_datasets(datasets, batch_size=64, num_workers=2):
     )
     return (train_loader, valid_loader, test_loader)
 
-
-
 def create_datasets(train_data_path = 'images\\train', test_data_path = 'images\\test'):
     #######################################################
     #               Define Transforms
@@ -125,15 +108,14 @@ def create_datasets(train_data_path = 'images\\train', test_data_path = 'images\
 
     train_transforms = A.Compose(
         [
-            A.Resize(128,128),
-            A.ShiftScaleRotate(shift_limit=0.05, scale_limit=0.05, rotate_limit=360, p=0.25),
-            A.RGBShift(r_shift_limit=15, g_shift_limit=15,b_shift_limit=15, p=0.25),
-            A.RandomBrightnessContrast(p=0.1),
-            A.MultiplicativeNoise(multiplier=[0.5, 2], per_channel=True, p=0.1),
+            A.Resize(150,150),
+            A.ShiftScaleRotate(shift_limit=0.03, scale_limit=0.03, rotate_limit=360, p=0.25),
+            #A.RGBShift(r_shift_limit=8, g_shift_limit=8,b_shift_limit=8, p=0.25),
+            A.MultiplicativeNoise(multiplier=[0.4, 1.1], p=0.1),
             A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
-            A.HorizontalFlip(p=0.5),
-            A.HueSaturationValue(hue_shift_limit=0.2, sat_shift_limit=0.2, val_shift_limit=0.2, p=0.25),
-            A.RandomBrightnessContrast(brightness_limit=(-0.1, 0.1), contrast_limit=(-0.1, 0.1), p=0.25),
+            #A.HorizontalFlip(p=0.25),
+            A.HueSaturationValue(hue_shift_limit=0.2, sat_shift_limit=0.2, val_shift_limit=0.2, p=0.15),
+            A.RandomBrightnessContrast(brightness_limit=(-0.04, 0.04), contrast_limit=(-0.04, 0.04), p=0.15),
             ToTensorV2(),
         ]
     )
@@ -226,7 +208,6 @@ def visualize_augmentations(dataset, idx=0, samples=10, cols=5, random_img=False
 
     #visualize_augmentations(train_dataset,np.random.randint(1,len(train_image_paths)), random_img = True)
 
-
 def train_new_model(classes, dataset, num_epochs, name='saved_model.pth'):
     train_loader = dataset[0]
     valid_loader = dataset[1]
@@ -241,9 +222,11 @@ def train_new_model(classes, dataset, num_epochs, name='saved_model.pth'):
     min_valid_loss = np.inf
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
-    #optimizer = optim.Adam(net.parameters(), lr=0.1)
+    #optimizer = optim.SGD(net.parameters(), lr=0.1, momentum=0.9)
+    optimizer = optim.Adam(net.parameters(), lr=0.001)
     #optimizer = optim.Adadelta(net.parameters(), lr=0.1)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, verbose=True)
+    print("Starting Training")
     for epoch in range(num_epochs):  # loop over the dataset multiple times
         running_loss = 0.0
         net.train(True)
@@ -259,10 +242,13 @@ def train_new_model(classes, dataset, num_epochs, name='saved_model.pth'):
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
-
             # print statistics
             running_loss += loss.item()
-        if epoch % 5 == 0: 
+        if epoch == num_epochs-10:
+            print("Changed optimizer to SGD")
+            optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
+            scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, verbose=True)
+        if epoch % 1 == 0: 
             net.eval()
             valid_loss = 0.0
             with torch.no_grad():
@@ -272,13 +258,13 @@ def train_new_model(classes, dataset, num_epochs, name='saved_model.pth'):
                     loss = criterion(target,labels)
                 # Calculate Loss
                     valid_loss += loss.item()
-        
+                scheduler.step(valid_loss)
                 print(f'Epoch {epoch} \t\t Training Loss: {running_loss / len(train_loader)} \t\t Validation Loss: {valid_loss / len(valid_loader)}')
             
                 if min_valid_loss > valid_loss:
                     print(f'Validation Loss Decreased({min_valid_loss:.6f}--->{valid_loss:.6f}) \t Saving The Model')
                     min_valid_loss = valid_loss
-                    torch.save(net.state_dict(), 'saved_model3.pth')
+                    torch.save(net.state_dict(), name)
         else:
             print(f'Epoch {epoch} \t\t Training Loss: {running_loss / len(train_loader)}')
 
@@ -312,7 +298,7 @@ def train_new_model(classes, dataset, num_epochs, name='saved_model.pth'):
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
 
-    print('Accuracy of the network on the 1250 test images: %d %%' % (
+    print('Accuracy of the network on the 1000 test images: %d %%' % (
         100 * correct / total))
 
     correct_pred = {classname: 0 for classname in classes}
@@ -393,10 +379,8 @@ def load_run(test_dataset, classes, path):
         print("Accuracy for class {:5s} is: {:.1f} %".format(classname,
                                                              accuracy))
 
-
-
 if __name__ == '__main__':
     classes, *dataset_raw = create_datasets()
     dataloaders = load_datasets(dataset_raw)
-    train_new_model(classes, dataloaders, 26, name='saved_model4.pth')
-    #load_run(dataloaders[2], classes,'saved_model3.pth')
+    train_new_model(classes, dataloaders, 36, name='saved_model5.pth')
+    #load_run(dataloaders[2], classes,'saved_model.pth')
