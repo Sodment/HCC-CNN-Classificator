@@ -39,7 +39,7 @@ class CustomDataset(Dataset):
         image = cv2.imread(image_filepath)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-        label = image_filepath.split('\\')[-2]
+        label = image_filepath.split('/')[-2]
         label = self.class_to_idx[label]
         if self.transform is not None:
             image = self.transform(image=image)["image"]
@@ -51,7 +51,12 @@ class Net(nn.Module):
         super().__init__()
         self.cnn_layers = nn.Sequential(
             # Defining a 2D convolution layer
-            nn.Conv2d(3, 16, 5), #default (3,6,5)
+            nn.Conv2d(3, 6, 5), #default (3,6,5)
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Dropout(0.2),
+            # Defining another 2D convolution layer
+            nn.Conv2d(6, 16, 5),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
             nn.Dropout(0.2),
@@ -59,17 +64,12 @@ class Net(nn.Module):
             nn.Conv2d(16, 32, 5),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
-            nn.Dropout(0.2),
-            # Defining another 2D convolution layer
-            nn.Conv2d(32, 64, 5),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2),
             nn.Dropout(0.1)
         )
         self.linear_layers = nn.Sequential(
-            nn.Linear(14400, 440), #400
-            nn.Linear(440,120), #84
-            nn.Linear(120, 6)
+            nn.Linear(4608, 400), #400
+            nn.Linear(400,84), #84
+            nn.Linear(84, 6)
         )
 
 
@@ -96,7 +96,7 @@ def load_datasets(datasets, batch_size=64, num_workers=2):
     )
     return (train_loader, valid_loader, test_loader)
 
-def create_datasets(train_data_path = 'images\\train', test_data_path = 'images\\test'):
+def create_datasets(train_data_path = 'images/train', test_data_path = 'images/test'):
     #######################################################
     #               Define Transforms
     #######################################################
@@ -108,7 +108,7 @@ def create_datasets(train_data_path = 'images\\train', test_data_path = 'images\
 
     train_transforms = A.Compose(
         [
-            A.Resize(150,150),
+            A.Resize(128,128),
             A.ShiftScaleRotate(shift_limit=0.03, scale_limit=0.03, rotate_limit=360, p=0.25),
             #A.RGBShift(r_shift_limit=8, g_shift_limit=8,b_shift_limit=8, p=0.25),
             A.MultiplicativeNoise(multiplier=[0.4, 1.1], p=0.1),
@@ -139,7 +139,7 @@ def create_datasets(train_data_path = 'images\\train', test_data_path = 'images\
     # 1.
     # get all the paths from train_data_path and append image paths and class to to respective lists
     for data_path in glob.glob(train_data_path + '/*'):
-        classes.append(data_path.split('\\')[-1])
+        classes.append(data_path.split('/')[-1])
         train_image_paths.append(glob.glob(data_path + '/*'))
     train_image_paths = list(flatten(train_image_paths))
     random.shuffle(train_image_paths)
@@ -246,8 +246,8 @@ def train_new_model(classes, dataset, num_epochs, name='saved_model.pth'):
             running_loss += loss.item()
         if epoch == num_epochs-10:
             print("Changed optimizer to SGD")
-            optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
-            scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, verbose=True)
+            optimizer = optim.SGD(net.parameters(), lr=0.00001, momentum=0.9)
+            scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=4, verbose=True)
         if epoch % 1 == 0: 
             net.eval()
             valid_loss = 0.0
@@ -273,10 +273,10 @@ def train_new_model(classes, dataset, num_epochs, name='saved_model.pth'):
     dataiter = iter(test_loader)
     images,labels = dataiter.next()
 
-    # print images
-    #imshow(torchvision.utils.make_grid(images))
+    #print images
+    imshow(torchvision.utils.make_grid(images))
     print('GroundTruth: ', ' '.join('%5s' %
-                                    classes[labels[j]] for j in range(4)))
+                                    classes[labels[j]] for j in range(64)))
 
     outputs = net(images)
 
@@ -330,17 +330,16 @@ def load_run(test_dataset, classes, path):
     dataiter = iter(test_dataset)
     images,labels = dataiter.next()
 
-    # print images
-    #imshow(torchvision.utils.make_grid(images))
-    print('GroundTruth: ', ' '.join('%5s' %
-                                    classes[labels[j]] for j in range(4)))
-
     outputs = net(images)
 
     _, predicted = torch.max(outputs, 1)
+    # print images
+    print('GroundTruth: ', ' '.join('%5s' %
+                                    classes[labels[j]] for j in range(64)))
 
     print('Predicted: ', ' '.join('%5s' % classes[predicted[j]]
-                              for j in range(4)))
+                              for j in range(64)))
+    imshow(torchvision.utils.make_grid(images))
 
     correct = 0
     total = 0
@@ -355,7 +354,7 @@ def load_run(test_dataset, classes, path):
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
 
-    print('Accuracy of the network on the 1250 test images: %d %%' % (
+    print('Accuracy of the network on the 3000 test images: %d %%' % (
         100 * correct / total))
 
     correct_pred = {classname: 0 for classname in classes}
@@ -381,6 +380,6 @@ def load_run(test_dataset, classes, path):
 
 if __name__ == '__main__':
     classes, *dataset_raw = create_datasets()
-    dataloaders = load_datasets(dataset_raw)
-    train_new_model(classes, dataloaders, 36, name='saved_model5.pth')
-    #load_run(dataloaders[2], classes,'saved_model.pth')
+    dataloaders = load_datasets(dataset_raw, num_workers=0)
+    #train_new_model(classes, dataloaders, 31, name='saved_model4.pth')
+    load_run(dataloaders[2], classes,'saved_model.pth')
